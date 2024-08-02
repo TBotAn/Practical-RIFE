@@ -2,13 +2,8 @@
 *.py~
 *.py#
 
-*.pkl
 output/*
 *.mp4
-
-test/
-.idea/
 run-commands.json
 *.npz
-
 *.zip
