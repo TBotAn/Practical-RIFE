@@ -9,7 +9,6 @@ import warnings
 import _thread
 from queue import Queue, Empty
 from model.pytorch_msssim import ssim_matlab
-import time
 
 warnings.filterwarnings("ignore")
 
@@ -22,6 +21,7 @@ def transferAudio(sourceVideo, targetVideo):
     if True:
         # clear old "temp" directory if it exits
         if os.path.isdir("temp"):
+            # remove temp directory
             shutil.rmtree("temp")
         # create new "temp" directory
         os.makedirs("temp")
@@ -123,7 +123,7 @@ if not args.video is None:
     fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
     video_path_wo_ext, ext = os.path.splitext(args.video)
     video_name = os.path.basename(video_path_wo_ext)
-    output_dir_name = f"{video_name}-rife-multi{args.multi}"
+    output_dir_name = f"{video_name}-rife"
     output_dir = os.path.join(os.path.dirname(video_path_wo_ext), output_dir_name)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -146,7 +146,7 @@ else:
 
     img_dir_name = os.path.basename(os.path.normpath(args.img))
     parent_dir = os.path.dirname(os.path.normpath(args.img))
-    output_dir_name = f"Practical-RIFE-for_{img_dir_name}-multi{args.multi}"
+    output_dir_name = f"Practical-RIFE-for_{img_dir_name}"
     output_dir = os.path.join(parent_dir, output_dir_name)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -178,8 +178,7 @@ def clear_write_buffer(user_args, write_buffer):
         if user_args.png:
             # Convert from RGB to BGR before saving
             item = cv2.cvtColor(item, cv2.COLOR_RGB2BGR)
-            prefix = f"{video_name}-rife-multi{args.multi}" if args.video else f"{img_dir_name}-rife-multi{args.multi}"
-            cv2.imwrite(os.path.join(output_dir, f'{prefix}-{cnt:04d}.png'), item)
+            cv2.imwrite(os.path.join(output_dir, '{:0>7d}.png'.format(cnt)), item)
             cnt += 1
         else:
             vid_out.write(cv2.cvtColor(item, cv2.COLOR_RGB2BGR))
@@ -236,8 +235,6 @@ _thread.start_new_thread(clear_write_buffer, (args, write_buffer))
 I1 = torch.from_numpy(np.transpose(lastframe, (2, 0, 1))).to(device, non_blocking=True).unsqueeze(0).float() / 255.
 I1 = pad_image(I1)
 temp = None # save lastframe when processing static frame
-
-start_time = time.time()  # Start the timer
 
 while True:
     if temp is not None:
@@ -316,8 +313,4 @@ if args.png == False and fpsNotAssigned == True and not args.video is None:
         targetNoAudio = os.path.splitext(vid_out_name)[0] + "_noaudio" + os.path.splitext(vid_out_name)[1]
         os.rename(targetNoAudio, vid_out_name)
 
-end_time = time.time()  # End the timer
-elapsed_time = end_time - start_time
-elapsed_minutes = elapsed_time // 60
-elapsed_seconds = elapsed_time % 60
-print(f"Script finished in {elapsed_minutes:.0f} minutes and {elapsed_seconds:.2f} seconds.")
+print("Script finished.")
