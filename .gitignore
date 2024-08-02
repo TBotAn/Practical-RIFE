@@ -9,6 +9,7 @@ train_log/*
 
 test/
 .idea/
+run-commands.json
 *.npz
 
 *.zip
