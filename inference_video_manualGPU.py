@@ -10,7 +10,7 @@ import _thread
 import skvideo.io
 from queue import Queue, Empty
 from model.pytorch_msssim import ssim_matlab
-from torch.nn import DataParallel  # Import DataParallel
+from torch.nn import DataParallel
 
 warnings.filterwarnings("ignore")
 
@@ -19,39 +19,28 @@ def transferAudio(sourceVideo, targetVideo):
     import moviepy.editor
     tempAudioFileName = "./temp/audio.mkv"
 
-    # split audio from original video file and store in "temp" directory
     if True:
-
-        # clear old "temp" directory if it exits
         if os.path.isdir("temp"):
-            # remove temp directory
             shutil.rmtree("temp")
-        # create new "temp" directory
         os.makedirs("temp")
-        # extract audio from video
         os.system('ffmpeg -y -i "{}" -c:a copy -vn {}'.format(sourceVideo, tempAudioFileName))
 
     targetNoAudio = os.path.splitext(targetVideo)[0] + "_noaudio" + os.path.splitext(targetVideo)[1]
     os.rename(targetVideo, targetNoAudio)
-    # combine audio file and new video file
     os.system('ffmpeg -y -i "{}" -i {} -c copy "{}"'.format(targetNoAudio, tempAudioFileName, targetVideo))
 
-    if os.path.getsize(targetVideo) == 0: # if ffmpeg failed to merge the video and audio together try converting the audio to aac
+    if os.path.getsize(targetVideo) == 0:
         tempAudioFileName = "./temp/audio.m4a"
         os.system('ffmpeg -y -i "{}" -c:a aac -b:a 160k -vn {}'.format(sourceVideo, tempAudioFileName))
         os.system('ffmpeg -y -i "{}" -i {} -c copy "{}"'.format(targetNoAudio, tempAudioFileName, targetVideo))
-        if (os.path.getsize(targetVideo) == 0): # if aac is not supported by selected format
+        if (os.path.getsize(targetVideo) == 0):
             os.rename(targetNoAudio, targetVideo)
             print("Audio transfer failed. Interpolated video will have no audio")
         else:
             print("Lossless audio transfer failed. Audio was transcoded to AAC (M4A) instead.")
-
-            # remove audio-less video
             os.remove(targetNoAudio)
     else:
         os.remove(targetNoAudio)
-
-    # remove temp directory
     shutil.rmtree("temp")
 
 parser = argparse.ArgumentParser(description='Interpolation for a pair of images')
