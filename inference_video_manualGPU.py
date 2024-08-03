@@ -7,7 +7,6 @@ from tqdm import tqdm
 from torch.nn import functional as F
 import warnings
 import _thread
-import skvideo.io
 from queue import Queue, Empty
 from model.pytorch_msssim import ssim_matlab
 from torch.nn import DataParallel
@@ -19,6 +18,7 @@ def transferAudio(sourceVideo, targetVideo):
     import moviepy.editor
     tempAudioFileName = "./temp/audio.mkv"
 
+    # split audio from original video file and store in "temp" directory
     if True:
         if os.path.isdir("temp"):
             shutil.rmtree("temp")
@@ -33,7 +33,7 @@ def transferAudio(sourceVideo, targetVideo):
         tempAudioFileName = "./temp/audio.m4a"
         os.system('ffmpeg -y -i "{}" -c:a aac -b:a 160k -vn {}'.format(sourceVideo, tempAudioFileName))
         os.system('ffmpeg -y -i "{}" -i {} -c copy "{}"'.format(targetNoAudio, tempAudioFileName, targetVideo))
-        if (os.path.getsize(targetVideo) == 0):
+        if os.path.getsize(targetVideo) == 0:
             os.rename(targetNoAudio, targetVideo)
             print("Audio transfer failed. Interpolated video will have no audio")
         else:
@@ -52,7 +52,6 @@ parser.add_argument('--model', dest='modelDir', type=str, default='train_log', h
 parser.add_argument('--fp16', dest='fp16', action='store_true', help='fp16 mode for faster and more lightweight inference on cards with Tensor Cores')
 parser.add_argument('--UHD', dest='UHD', action='store_true', help='support 4k video')
 parser.add_argument('--scale', dest='scale', type=float, default=1.0, help='Try scale=0.5 for 4k video')
-parser.add_argument('--skip', dest='skip', action='store_true', help='whether to remove static frames before processing')
 parser.add_argument('--fps', dest='fps', type=int, default=None)
 parser.add_argument('--png', dest='png', action='store_true', help='whether to vid_out png format vid_outs')
 parser.add_argument('--ext', dest='ext', type=str, default='mp4', help='vid_out video extension')
@@ -63,9 +62,7 @@ args = parser.parse_args()
 if args.exp != 1:
     args.multi = (2 ** args.exp)
 assert (not args.video is None or not args.img is None)
-if args.skip:
-    print("skip flag is abandoned, please refer to issue #207.")
-if args.UHD and args.scale==1.0:
+if args.UHD and args.scale == 1.0:
     args.scale = 0.5
 assert args.scale in [0.25, 0.5, 1.0, 2.0, 4.0]
 if not args.img is None:
@@ -83,58 +80,88 @@ try:
     from train_log.RIFE_HDv3 import Model
 except:
     print("Please download our model from model list")
+    exit()
+
+print("Initializing model...")
 model = Model()
 if not hasattr(model, 'version'):
     model.version = 0
 model.load_model(args.modelDir, -1)
 print("Loaded 3.x/4.x HD model.")
-model = DataParallel(model)  # Wrap model with DataParallel
+model = DataParallel(model)
 model.to(device)
 model.eval()
 
-# Clear GPU cache before starting inference
-torch.cuda.empty_cache()
+output_dir = None
 
 if not args.video is None:
+    print(f"Processing video: {args.video}")
     videoCapture = cv2.VideoCapture(args.video)
     fps = videoCapture.get(cv2.CAP_PROP_FPS)
     tot_frame = videoCapture.get(cv2.CAP_PROP_FRAME_COUNT)
-    videoCapture.release()
     if args.fps is None:
         fpsNotAssigned = True
         args.fps = fps * args.multi
     else:
         fpsNotAssigned = False
-    videogen = skvideo.io.vreader(args.video)
-    lastframe = next(videogen)
+
+    videogen = []
+    success, frame = videoCapture.read()
+    while success:
+        videogen.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))  # Convert to RGB
+        success, frame = videoCapture.read()
+    videoCapture.release()
+
+    lastframe = videogen[0]
+    h, w, _ = lastframe.shape
     fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
     video_path_wo_ext, ext = os.path.splitext(args.video)
-    print('{}.{}, {} frames in total, {}FPS to {}FPS'.format(video_path_wo_ext, args.ext, tot_frame, fps, args.fps))
+    video_name = os.path.basename(video_path_wo_ext)
+    output_dir_name = f"{video_name}-rife"
+    output_dir = os.path.join(os.path.dirname(video_path_wo_ext), output_dir_name)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    print('{} frames in total, {}FPS to {}FPS'.format(tot_frame, fps, args.fps))
     if args.png == False and fpsNotAssigned == True:
         print("The audio will be merged after interpolation process")
     else:
         print("Will not merge audio because using png or fps flag!")
 else:
+    print(f"Processing image sequence from directory: {args.img}")
     videogen = []
     for f in os.listdir(args.img):
         if 'png' in f:
             videogen.append(f)
     tot_frame = len(videogen)
-    videogen.sort(key= lambda x:int(x[:-4]))
-    lastframe = cv2.imread(os.path.join(args.img, videogen[0]), cv2.IMREAD_UNCHANGED)[:, :, ::-1].copy()
+    videogen.sort(key=lambda x: int(x[:-4]))
+    lastframe = cv2.cvtColor(cv2.imread(os.path.join(args.img, videogen[0])), cv2.COLOR_BGR2RGB)
     videogen = videogen[1:]
-h, w, _ = lastframe.shape
+    h, w, _ = lastframe.shape
+
+    img_dir_name = os.path.basename(os.path.normpath(args.img))
+    parent_dir = os.path.dirname(os.path.normpath(args.img))
+    output_dir_name = f"Practical-RIFE-for_{img_dir_name}"
+    output_dir = os.path.join(parent_dir, output_dir_name)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    print(f"Output will be saved to: {output_dir}")
+
 vid_out_name = None
 vid_out = None
 if args.png:
-    if not os.path.exists('vid_out'):
-        os.mkdir('vid_out')
+    if not os.path.exists(output_dir):
+        os.mkdir(output_dir)
 else:
     if args.output is not None:
         vid_out_name = args.output
     else:
-        vid_out_name = '{}_{}X_{}fps.{}'.format(video_path_wo_ext, args.multi, int(np.round(args.fps)), args.ext)
+        if not args.video is None:
+            vid_out_name = os.path.join(output_dir, '{}_{}X_{}fps.{}'.format(video_name, args.multi, int(np.round(args.fps)), args.ext))
+        else:
+            vid_out_name = os.path.join(output_dir, '{}_{}X_{}fps.{}'.format(img_dir_name, args.multi, int(np.round(args.fps)), args.ext))
     vid_out = cv2.VideoWriter(vid_out_name, fourcc, args.fps, (w, h))
+
+print(f"Output will be saved to: {vid_out_name if vid_out_name else 'output directory (PNG format)'}")
 
 def clear_write_buffer(user_args, write_buffer):
     cnt = 0
@@ -143,22 +170,22 @@ def clear_write_buffer(user_args, write_buffer):
         if item is None:
             break
         if user_args.png:
-            cv2.imwrite('vid_out/{:0>7d}.png'.format(cnt), item[:, :, ::-1])
+            # Convert from RGB to BGR before saving
+            item = cv2.cvtColor(item, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(os.path.join(output_dir, '{:0>7d}.png'.format(cnt)), item)
             cnt += 1
         else:
-            vid_out.write(item[:, :, ::-1])
+            vid_out.write(cv2.cvtColor(item, cv2.COLOR_RGB2BGR))
+    print("Finished writing frames.")
 
 def build_read_buffer(user_args, read_buffer, videogen):
     try:
         for frame in videogen:
-            if not user_args.img is None:
-                frame = cv2.imread(os.path.join(user_args.img, frame), cv2.IMREAD_UNCHANGED)[:, :, ::-1].copy()
-            if user_args.montage:
-                frame = frame[:, left: left + w]
             read_buffer.put(frame)
-    except:
-        pass
+    except Exception as e:
+        print(f"Error reading frames: {e}")
     read_buffer.put(None)
+    print("Finished reading frames.")
 
 def make_inference(I0, I1, n):    
     global model
@@ -199,7 +226,7 @@ read_buffer = Queue(maxsize=500)
 _thread.start_new_thread(build_read_buffer, (args, read_buffer, videogen))
 _thread.start_new_thread(clear_write_buffer, (args, write_buffer))
 
-I1 = torch.from_numpy(np.transpose(lastframe, (2,0,1))).to(device, non_blocking=True).unsqueeze(0).float() / 255.
+I1 = torch.from_numpy(np.transpose(lastframe, (2, 0, 1))).to(device, non_blocking=True).unsqueeze(0).float() / 255.
 I1 = pad_image(I1)
 temp = None # save lastframe when processing static frame
 
@@ -212,7 +239,7 @@ while True:
     if frame is None:
         break
     I0 = I1
-    I1 = torch.from_numpy(np.transpose(frame, (2,0,1))).to(device, non_blocking=True).unsqueeze(0).float() / 255.
+    I1 = torch.from_numpy(np.transpose(frame, (2, 0, 1))).to(device, non_blocking=True).unsqueeze(0).float() / 255.
     I1 = pad_image(I1)
     I0_small = F.interpolate(I0, (32, 32), mode='bilinear', align_corners=False)
     I1_small = F.interpolate(I1, (32, 32), mode='bilinear', align_corners=False)
@@ -226,7 +253,7 @@ while True:
             frame = lastframe
         else:
             temp = frame
-        I1 = torch.from_numpy(np.transpose(frame, (2,0,1))).to(device, non_blocking=True).unsqueeze(0).float() / 255.
+        I1 = torch.from_numpy(np.transpose(frame, (2, 0, 1))).to(device, non_blocking=True).unsqueeze(0).float() / 255.
         I1 = pad_image(I1)
         I1 = model.module.inference(I0, I1, args.scale)
         I1_small = F.interpolate(I1, (32, 32), mode='bilinear', align_corners=False)
@@ -268,10 +295,16 @@ pbar.close()
 if not vid_out is None:
     vid_out.release()
 
+print("Finished processing frames.")
+
+# move audio to new video file if appropriate
 if args.png == False and fpsNotAssigned == True and not args.video is None:
     try:
+        print("Transferring audio...")
         transferAudio(args.video, vid_out_name)
-    except:
-        print("Audio transfer failed. Interpolated video will have no audio")
+    except Exception as e:
+        print(f"Audio transfer failed: {e}")
         targetNoAudio = os.path.splitext(vid_out_name)[0] + "_noaudio" + os.path.splitext(vid_out_name)[1]
         os.rename(targetNoAudio, vid_out_name)
+
+print("Script finished.")
