@@ -1,0 +1,3 @@
+@echo off
+python3 ./inference_video.py --multi=3 --video="F:/1_Projects/2024/steelworks/[002]_unisys/FINAL_PRODUCTION/SLOWDOWN_PROCESS/01_POST_TBClean_FILES/WIDE-TBCleaner-DNxHR-SQ/WIDE-Mask-TBCleaner-DNxHR-SQ.mov" --png
+python3 ./inference_video.py --multi=3 --video="F:/1_Projects/2024/steelworks/[002]_unisys/FINAL_PRODUCTION/SLOWDOWN_PROCESS/01_POST_TBClean_FILES/WIDE-TBCleaner-DNxHR-SQ/WIDE-TBCleaner-DNxHR-SQ.mov" --png
